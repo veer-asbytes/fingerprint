@@ -1,0 +1,25 @@
+[package]
+name = "fingerprint"
+description = "Rust file fingerprinting library, supporting many types of audio/video/image/text file formats."
+version = "0.0.1"
+edition = "2021"
+authors = ["Simon Allen <simon@simonallen.org>"]
+license = "MIT"
+homepage = "https://github.com/garfunkel/fingerprint"
+repository = "https://github.com/garfunkel/fingerprint"
+keywords = ["video", "image", "audio", "fingerprint", "hash"]
+categories = ["command-line-utilities", "filesystem", "multimedia", "encoding"]
+
+[dependencies]
+clap = {version = "3.2.16", features = ["derive"]}
+ffmpeg-next = "5.0.3"
+
+[features]
+default = ["image", "video", "audio", "text"]
+image = []
+video = []
+audio = []
+text = []
+
+[package.metadata.docs.rs]
+all-features = true
