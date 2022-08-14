@@ -4,53 +4,151 @@
 #![allow(clippy::tabs_in_doc_comments)]
 
 use std::{
+	error,
 	fmt::Display,
 	path::{Path, PathBuf},
 };
 
-/// Fingerprint represents a 64-byte fingerprint.
-#[derive(Debug)]
-pub struct Fingerprint {
-	data: [u8; 64],
+use bitvec::prelude::*;
+use hex;
+use infer;
+
+use fingerprinters::{raw::RawFingerprinter, FingerSegment, Fingerprinter};
+
+/// Dedicated fingerprinters for various file types.
+pub mod fingerprinters;
+
+/// Number of bits (segments) in fingerprint.
+const NUM_FINGERPRINT_SEGMENTS: usize = 128;
+
+/// File types with dedicated fingerprinters.
+#[derive(Debug, Clone)]
+pub enum Type {
+	/// Raw fingerprinter.
+	Raw,
+
+	/// Text fingerprinter.
+	Text,
+
+	/// Image fingerprinter.
+	Image,
+
+	/// Audio fingerprinter.
+	Audio,
+
+	/// Video fingerprinter.
+	Video,
 }
 
-impl Display for Fingerprint {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		for byte in self.data {
-			write!(f, "{:x?}", byte)?;
+/// Generic [error::Error] type.
+type Error = Box<dyn error::Error>;
+
+/// High-level methods for producing deterministic fingerprints for files.
+#[derive(Debug, Clone)]
+pub struct Fingerprint {
+	path: PathBuf,
+	fp_bits: BitBox<u8>,
+	r#type: Type,
+}
+
+impl Fingerprint {
+	/// Generate a deterministic fingerprint for a file at the given path.
+	pub fn finger<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
+		let (fp_bits, kind) = match infer::get_from_path(&path)? {
+			Some(kind) => match kind.matcher_type() {
+				infer::MatcherType::Text => {
+					todo!()
+				}
+				infer::MatcherType::Image => {
+					todo!()
+				}
+				infer::MatcherType::Audio => {
+					todo!()
+				}
+				infer::MatcherType::Video => {
+					todo!()
+				}
+				_ => (Self::process(&RawFingerprinter::new(&path)?), Type::Raw),
+			},
+			None => (Self::process(&RawFingerprinter::new(&path)?), Type::Raw),
+		};
+
+		Ok(Self {
+			path: path.as_ref().into(),
+			fp_bits: fp_bits,
+			r#type: kind,
+		})
+	}
+
+	/// Process through each segment of a file using a particular fingerprinter, generating the final fingerprint.
+	fn process<'fp, F>(fp: &'fp F) -> BitBox<u8>
+	where
+		F: Fingerprinter<'fp>,
+		F::Segment: Iterator + Clone,
+		<F::Segment as Iterator>::Item: FingerSegment<'fp>,
+		<<F::Segment as Iterator>::Item as FingerSegment<'fp>>::Value: PartialOrd,
+	{
+		let mut fp_bits = bitbox![u8, Lsb0; 0; 128];
+		let mut last = None;
+		let mut bit_index = 0;
+
+		for mut segment in fp.segments().cycle() {
+			let value = segment.value();
+
+			if let Some(last) = last {
+				if value >= last {
+					fp_bits.set(bit_index, true);
+				}
+
+				bit_index += 1;
+
+				if bit_index >= 128 {
+					break;
+				}
+			}
+
+			last = Some(value);
 		}
 
-		Ok(())
+		fp_bits
+	}
+
+	/// Return vector of fingerprint bits.
+	pub fn bits(&self) -> BitBox<u8> {
+		self.fp_bits.clone()
+	}
+
+	/// Return vector of fingerprint bytes.
+	pub fn bytes(&self) -> &[u8] {
+		self.fp_bits.as_raw_slice()
+	}
+
+	/// Return path to fingerprinted file.
+	pub fn path(&self) -> PathBuf {
+		self.path.to_path_buf()
+	}
+
+	/// Return type of fingerprinter used.
+	pub fn r#type(&self) -> Type {
+		self.r#type.clone()
 	}
 }
 
-/// Fingerprinter provides methods for generating fingerprints.
-#[derive(Debug)]
-pub struct Fingerprinter {
-	path: PathBuf,
-}
-
-impl Fingerprinter {
-	/// Generate a fingerprint for the given path.
-	pub fn finger<P: AsRef<Path>>(path: P) -> Fingerprint {
-		/*Self {
-			path: path.as_ref().into(),
-		}*/
-
-		return Fingerprint {
-			data: [0xff].repeat(64).try_into().unwrap(),
-		};
+impl Display for Fingerprint {
+	/// Formats the fingerprint in hexadecimal notation.
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", hex::encode(self.bytes()))
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::Fingerprinter;
+	use crate::Fingerprint;
 
 	#[test]
-	fn test_fingerprinter() {
-		let fp = Fingerprinter::finger("test.mkv");
+	fn test_raw() {
+		let fp = Fingerprint::finger("LICENSE").unwrap();
 
-		println!("{}", fp);
+		assert_eq!(fp.to_string(), "a69492744952524a5266598944b42489");
 	}
 }
