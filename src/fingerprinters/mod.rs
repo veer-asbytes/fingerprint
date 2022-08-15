@@ -51,7 +51,10 @@ impl ChooseMultipleStable for Vec<usize> {
 }
 
 /// Contract of methods implementing a fingerprinter.
-pub trait Fingerprinter<'fp> {
+pub trait Fingerprinter<'fp>
+where
+	Self::SegmentIter: Iterator + Clone,
+{
 	/// Type of fingerprint segment iterator.
 	type SegmentIter;
 
@@ -68,7 +71,11 @@ pub trait Fingerprinter<'fp> {
 }
 
 /// Methods for a fingerprint segment. A fingerprint consists of a fixed number of segments.
-pub trait FingerSegment<'fp> {
+pub trait FingerSegment<'fp>
+where
+	Self::ElementIter: Iterator + Clone,
+	Self::Value: PartialOrd,
+{
 	/// Type of fingerprinter.
 	type Fingerprinter;
 

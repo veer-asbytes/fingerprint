@@ -13,7 +13,7 @@ use bitvec::prelude::*;
 use hex;
 use infer;
 
-use fingerprinters::{raw::RawFingerprinter, FingerSegment, Fingerprinter};
+use fingerprinters::{raw::RawFingerprinter, FingerElement, FingerSegment, Fingerprinter};
 
 /// Dedicated fingerprinters for various file types.
 pub mod fingerprinters;
@@ -84,9 +84,7 @@ impl Fingerprint {
 	fn process<'fp, F>(fp: &'fp F) -> BitBox<u8>
 	where
 		F: Fingerprinter<'fp>,
-		F::SegmentIter: Iterator + Clone,
 		<F::SegmentIter as Iterator>::Item: FingerSegment<'fp>,
-		<<F::SegmentIter as Iterator>::Item as FingerSegment<'fp>>::Value: PartialOrd,
 	{
 		let mut fp_bits = bitbox![u8, Lsb0; 0; 128];
 		let mut last = None;
