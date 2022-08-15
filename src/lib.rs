@@ -84,9 +84,9 @@ impl Fingerprint {
 	fn process<'fp, F>(fp: &'fp F) -> BitBox<u8>
 	where
 		F: Fingerprinter<'fp>,
-		F::Segment: Iterator + Clone,
-		<F::Segment as Iterator>::Item: FingerSegment<'fp>,
-		<<F::Segment as Iterator>::Item as FingerSegment<'fp>>::Value: PartialOrd,
+		F::SegmentIter: Iterator + Clone,
+		<F::SegmentIter as Iterator>::Item: FingerSegment<'fp>,
+		<<F::SegmentIter as Iterator>::Item as FingerSegment<'fp>>::Value: PartialOrd,
 	{
 		let mut fp_bits = bitbox![u8, Lsb0; 0; 128];
 		let mut last = None;
@@ -96,7 +96,7 @@ impl Fingerprint {
 			let value = segment.value();
 
 			if let Some(last) = last {
-				if value >= last {
+				if value > last {
 					fp_bits.set(bit_index, true);
 				}
 
@@ -149,6 +149,6 @@ mod tests {
 	fn test_raw() {
 		let fp = Fingerprint::finger("LICENSE").unwrap();
 
-		assert_eq!(fp.to_string(), "a69492744952524a5266598944b42489");
+		assert_eq!(fp.to_string(), "6a6ed537622bd136559056d58a55c9d2");
 	}
 }

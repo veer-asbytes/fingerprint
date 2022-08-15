@@ -52,8 +52,8 @@ impl ChooseMultipleStable for Vec<usize> {
 
 /// Contract of methods implementing a fingerprinter.
 pub trait Fingerprinter<'fp> {
-	/// Type of fingerprint segment.
-	type Segment;
+	/// Type of fingerprint segment iterator.
+	type SegmentIter;
 
 	/// Create new fingerprinter.
 	fn new<P: AsRef<Path>>(path: P) -> Result<Self, Error>
@@ -64,7 +64,7 @@ pub trait Fingerprinter<'fp> {
 	fn path(&self) -> PathBuf;
 
 	/// Returns iterator over fingerprint segments.
-	fn segments(&'fp self) -> Self::Segment;
+	fn segments(&'fp self) -> Self::SegmentIter;
 }
 
 /// Methods for a fingerprint segment. A fingerprint consists of a fixed number of segments.
@@ -72,8 +72,8 @@ pub trait FingerSegment<'fp> {
 	/// Type of fingerprinter.
 	type Fingerprinter;
 
-	/// Type of fingerprint element.
-	type Element;
+	/// Type of fingerprint segment element iterator.
+	type ElementIter;
 
 	/// Type of fingerprint segment value.
 	type Value;
@@ -91,7 +91,7 @@ pub trait FingerSegment<'fp> {
 	fn size(&self) -> usize;
 
 	/// Returns an iterator over the elements in the current segment.
-	fn elements(&'fp self) -> Self::Element;
+	fn elements(&'fp self) -> Self::ElementIter;
 
 	/// Returns the segment value.
 	fn value(&mut self) -> Self::Value;

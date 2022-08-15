@@ -21,7 +21,7 @@ pub struct RawFingerprinter {
 }
 
 impl<'fp> Fingerprinter<'fp> for RawFingerprinter {
-	type Segment = RawSegmentIterator<'fp>;
+	type SegmentIter = RawSegmentIterator<'fp>;
 
 	fn new<P: AsRef<std::path::Path>>(path: P) -> Result<RawFingerprinter, Error> {
 		let path = path.as_ref().to_path_buf();
@@ -43,8 +43,8 @@ impl<'fp> Fingerprinter<'fp> for RawFingerprinter {
 		self.path.clone()
 	}
 
-	fn segments(&'fp self) -> Self::Segment {
-		Self::Segment {
+	fn segments(&'fp self) -> Self::SegmentIter {
+		Self::SegmentIter {
 			fp: self,
 			index: 0,
 			pos: 0,
@@ -64,7 +64,7 @@ pub struct RawSegment<'fp> {
 
 impl<'fp> FingerSegment<'fp> for RawSegment<'fp> {
 	type Fingerprinter = &'fp RawFingerprinter;
-	type Element = RawElementIterator<'fp>;
+	type ElementIter = RawElementIterator<'fp>;
 	type Value = u8;
 
 	fn fingerprinter(&self) -> Self::Fingerprinter {
@@ -87,21 +87,27 @@ impl<'fp> FingerSegment<'fp> for RawSegment<'fp> {
 		match self.value {
 			Some(value) => value,
 			None => {
-				let total = self
-					.elements()
-					.fold(0u128, |total, element| total + element.data() as u128);
+				if self.size == 0 {
+					self.value = Some(0);
 
-				let value = (total / self.size as u128) as u8;
+					0
+				} else {
+					let total = self
+						.elements()
+						.fold(0u128, |total, element| total + element.data() as u128);
 
-				self.value = Some(value);
+					let value = (total / self.size as u128) as u8;
 
-				value
+					self.value = Some(value);
+
+					value
+				}
 			}
 		}
 	}
 
-	fn elements(&'fp self) -> Self::Element {
-		Self::Element {
+	fn elements(&'fp self) -> Self::ElementIter {
+		Self::ElementIter {
 			fp: self.fp,
 			segment: self,
 			index: 0,
@@ -121,6 +127,10 @@ impl<'fp> Iterator for RawSegmentIterator<'fp> {
 	type Item = RawSegment<'fp>;
 
 	fn next(&mut self) -> Option<Self::Item> {
+		if self.index >= NUM_FINGERPRINT_SEGMENTS {
+			return None;
+		}
+
 		let index = self.index;
 		let start_pos = self.pos;
 		let end_pos = start_pos + self.fp.segment_sizes.get(index)?;
@@ -128,16 +138,13 @@ impl<'fp> Iterator for RawSegmentIterator<'fp> {
 		self.index += 1;
 		self.pos = end_pos;
 
-		match self.index {
-			0..=NUM_FINGERPRINT_SEGMENTS => Some(RawSegment {
-				fp: self.fp,
-				index: index,
-				pos: start_pos,
-				size: end_pos - start_pos,
-				value: None,
-			}),
-			_ => None,
-		}
+		Some(RawSegment {
+			fp: self.fp,
+			index: index,
+			pos: start_pos,
+			size: end_pos - start_pos,
+			value: None,
+		})
 	}
 }
 
@@ -194,6 +201,10 @@ impl<'fp> Iterator for RawElementIterator<'fp> {
 	type Item = RawElement<'fp>;
 
 	fn next(&mut self) -> Option<Self::Item> {
+		if self.index >= self.segment.size {
+			return None;
+		}
+
 		let index = self.index;
 		let pos = self.segment.pos + index;
 		let mut data = [0u8; 1];
