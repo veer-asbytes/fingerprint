@@ -230,10 +230,7 @@ impl<'fp> Iterator for RawElementIterator<'fp> {
 		let data: Result<u8, Arc<dyn error::Error>> =
 			match self.fp.handle.read_exact_at(&mut data, pos as u64) {
 				Ok(_) => Ok(data[0]),
-				Err(e) => {
-					//
-					Err(Arc::new(e))
-				}
+				Err(e) => Err(Arc::new(e)),
 			};
 
 		self.index += 1;
