@@ -108,13 +108,12 @@ pub trait FingerSegment<'fp>
 where
 	&'fp Self: 'fp + IntoIterator,
 	<&'fp Self as IntoIterator>::Item: FingerElement,
-	Self::Value: PartialOrd,
 {
 	/// Type of fingerprinter.
 	type Fingerprinter;
 
 	/// Type of fingerprint segment value.
-	type Value;
+	type Value: PartialOrd;
 
 	/// Returns fingerprinter.
 	fn fingerprinter(&self) -> Self::Fingerprinter;
