@@ -86,7 +86,7 @@ where
 					}
 				}
 				None => {
-					first = Some(value);
+					first = Some(segment.value()?);
 				}
 			}
 
@@ -108,7 +108,7 @@ pub trait FingerSegment<'fp>
 where
 	&'fp Self: 'fp + IntoIterator,
 	<&'fp Self as IntoIterator>::Item: FingerElement,
-	Self::Value: PartialOrd + Copy,
+	Self::Value: PartialOrd,
 {
 	/// Type of fingerprinter.
 	type Fingerprinter;
