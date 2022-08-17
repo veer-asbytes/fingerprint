@@ -10,10 +10,8 @@ use std::{
 };
 
 use bitvec::prelude::*;
-use hex;
-use infer;
 
-use fingerprinters::{raw::RawFingerprinter, FingerElement, FingerSegment, Fingerprinter};
+use fingerprinters::{raw::RawFingerprinter, Fingerprinter};
 
 /// Dedicated fingerprinters for various file types.
 pub mod fingerprinters;
@@ -47,14 +45,14 @@ type Error = Box<dyn error::Error>;
 #[derive(Debug, Clone)]
 pub struct Fingerprint {
 	path: PathBuf,
-	fp_bits: BitBox<u8>,
+	fingerprint: BitBox<u8>,
 	r#type: Type,
 }
 
 impl Fingerprint {
 	/// Generate a deterministic fingerprint for a file at the given path.
 	pub fn finger<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
-		let (fp_bits, kind) = match infer::get_from_path(&path)? {
+		let (fingerprint, kind) = match infer::get_from_path(&path)? {
 			Some(kind) => match kind.matcher_type() {
 				infer::MatcherType::Text => {
 					todo!()
@@ -68,57 +66,39 @@ impl Fingerprint {
 				infer::MatcherType::Video => {
 					todo!()
 				}
-				_ => (Self::process(&RawFingerprinter::new(&path)?), Type::Raw),
+				_ => (RawFingerprinter::new(&path)?.finger()?, Type::Raw),
 			},
-			None => (Self::process(&RawFingerprinter::new(&path)?), Type::Raw),
+			None => (RawFingerprinter::new(&path)?.finger()?, Type::Raw),
 		};
 
 		Ok(Self {
 			path: path.as_ref().into(),
-			fp_bits: fp_bits,
+			fingerprint,
 			r#type: kind,
 		})
 	}
 
-	/// Process through each segment of a file using a particular fingerprinter, generating the final fingerprint.
-	fn process<'fp, F>(fp: &'fp F) -> BitBox<u8>
-	where
-		F: Fingerprinter<'fp>,
-		<F::SegmentIter as Iterator>::Item: FingerSegment<'fp>,
-	{
-		let mut fp_bits = bitbox![u8, Lsb0; 0; 128];
-		let mut last = None;
-		let mut bit_index = 0;
+	/// Compare this fingerprint with another. Fingerprints may have different [Fingerprint::type]s.
+	pub fn compare(&self, other: &Fingerprint) -> f64 {
+		let mut similarity = 0f64;
 
-		for mut segment in fp.segments().cycle() {
-			let value = segment.value();
-
-			if let Some(last) = last {
-				if value > last {
-					fp_bits.set(bit_index, true);
-				}
-
-				bit_index += 1;
-
-				if bit_index >= 128 {
-					break;
-				}
+		for (lbit, rbit) in self.bits().iter().zip(other.bits().iter()) {
+			if lbit == rbit {
+				similarity += 1f64;
 			}
-
-			last = Some(value);
 		}
 
-		fp_bits
+		similarity / NUM_FINGERPRINT_SEGMENTS as f64
 	}
 
 	/// Return vector of fingerprint bits.
 	pub fn bits(&self) -> BitBox<u8> {
-		self.fp_bits.clone()
+		self.fingerprint.clone()
 	}
 
 	/// Return vector of fingerprint bytes.
 	pub fn bytes(&self) -> &[u8] {
-		self.fp_bits.as_raw_slice()
+		self.fingerprint.as_raw_slice()
 	}
 
 	/// Return path to fingerprinted file.
@@ -144,9 +124,44 @@ mod tests {
 	use crate::Fingerprint;
 
 	#[test]
-	fn test_raw() {
-		let fp = Fingerprint::finger("LICENSE").unwrap();
+	fn test_empty() {
+		assert_eq!(
+			Fingerprint::finger("samples/empty").unwrap().to_string(),
+			"51ad9acc76659b1a4d4da56055b1b532"
+		);
+	}
 
-		assert_eq!(fp.to_string(), "6a6ed537622bd136559056d58a55c9d2");
+	#[test]
+	fn test_ascii_text() {
+		assert_eq!(
+			Fingerprint::finger("samples/ascii.txt")
+				.unwrap()
+				.to_string(),
+			"6964d14b3a2bf3264db15649d5de4ad5"
+		);
+	}
+
+	#[test]
+	fn test_ascii_text_similar() {
+		let first = Fingerprint::finger("samples/ascii.txt").unwrap();
+		let second = Fingerprint::finger("samples/ascii_similar.txt").unwrap();
+
+		assert_eq!(first.compare(&second), 0.859375);
+	}
+
+	#[test]
+	fn test_ascii_text_somewhat_similar() {
+		let first = Fingerprint::finger("samples/ascii.txt").unwrap();
+		let second = Fingerprint::finger("samples/ascii_somewhat_similar.txt").unwrap();
+
+		assert_eq!(first.compare(&second), 0.65625);
+	}
+
+	#[test]
+	fn test_ascii_text_different() {
+		let first = Fingerprint::finger("samples/ascii.txt").unwrap();
+		let second = Fingerprint::finger("samples/ascii_different.txt").unwrap();
+
+		assert_eq!(first.compare(&second), 0.4921875);
 	}
 }

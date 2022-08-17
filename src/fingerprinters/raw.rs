@@ -1,12 +1,15 @@
 use std::fs::File;
+use std::sync::Arc;
 use std::{
+	error,
 	mem::size_of,
 	os::unix::fs::{FileExt, MetadataExt},
 	path::PathBuf,
 };
 
 use divrem::DivRem;
-use rand::{rngs::SmallRng, SeedableRng};
+use rand::{Rng, SeedableRng};
+use rand_chacha::ChaCha8Rng;
 
 use crate::NUM_FINGERPRINT_SEGMENTS;
 
@@ -17,54 +20,59 @@ use super::{ChooseMultipleStable, Error, FingerElement, FingerSegment, Fingerpri
 pub struct RawFingerprinter {
 	path: PathBuf,
 	handle: File,
+	rng: ChaCha8Rng,
 	segment_sizes: Vec<usize>,
 }
 
 impl<'fp> Fingerprinter<'fp> for RawFingerprinter {
-	type SegmentIter = RawSegmentIterator<'fp>;
-
 	fn new<P: AsRef<std::path::Path>>(path: P) -> Result<RawFingerprinter, Error> {
 		let path = path.as_ref().to_path_buf();
 		let size = path.metadata()?.size() as usize;
 		let (segment_size, remainder) = size.div_rem(NUM_FINGERPRINT_SEGMENTS);
-		let mut rng: SmallRng = SeedableRng::seed_from_u64(RNG_SEED);
+		let mut rng = ChaCha8Rng::seed_from_u64(RNG_SEED);
 		let mut segment_sizes = vec![segment_size; NUM_FINGERPRINT_SEGMENTS];
 
 		segment_sizes.choose_multiple_stable(&mut rng, segment_size, remainder);
 
 		Ok(Self {
 			handle: File::open(&path)?,
-			path: path,
-			segment_sizes: segment_sizes,
+			rng,
+			path,
+			segment_sizes,
 		})
 	}
 
 	fn path(&self) -> PathBuf {
 		self.path.clone()
 	}
+}
 
-	fn segments(&'fp self) -> Self::SegmentIter {
-		Self::SegmentIter {
+impl<'fp> IntoIterator for &'fp RawFingerprinter {
+	type Item = RawSegment<'fp>;
+	type IntoIter = RawSegmentIterator<'fp>;
+
+	fn into_iter(self) -> Self::IntoIter {
+		Self::IntoIter {
 			fp: self,
 			index: 0,
 			pos: 0,
+			rng: self.rng.clone(),
 		}
 	}
 }
 
 /// Structure for a raw fingerprint segment
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RawSegment<'fp> {
 	fp: &'fp RawFingerprinter,
 	index: usize,
 	pos: usize,
 	size: usize,
-	value: Option<u8>,
+	value: Option<Result<u8, Arc<dyn error::Error>>>,
 }
 
 impl<'fp> FingerSegment<'fp> for RawSegment<'fp> {
 	type Fingerprinter = &'fp RawFingerprinter;
-	type ElementIter = RawElementIterator<'fp>;
 	type Value = u8;
 
 	fn fingerprinter(&self) -> Self::Fingerprinter {
@@ -83,31 +91,33 @@ impl<'fp> FingerSegment<'fp> for RawSegment<'fp> {
 		self.size
 	}
 
-	fn value(&mut self) -> Self::Value {
-		match self.value {
-			Some(value) => value,
+	fn value(&mut self) -> Result<Self::Value, Error> {
+		match &self.value {
+			Some(value) => match value.clone() {
+				Ok(data) => Ok(data),
+				Err(e) => Err(Box::new(e)),
+			},
 			None => {
-				if self.size == 0 {
-					self.value = Some(0);
+				let total = self.into_iter().try_fold(0u128, |total, element| {
+					Ok::<u128, Error>(total + element.data()? as u128)
+				})?;
 
-					0
-				} else {
-					let total = self
-						.elements()
-						.fold(0u128, |total, element| total + element.data() as u128);
+				let value = (total / self.size as u128) as u8;
 
-					let value = (total / self.size as u128) as u8;
+				self.value = Some(Ok(value));
 
-					self.value = Some(value);
-
-					value
-				}
+				Ok(value)
 			}
 		}
 	}
+}
 
-	fn elements(&'fp self) -> Self::ElementIter {
-		Self::ElementIter {
+impl<'fp> IntoIterator for &'fp RawSegment<'fp> {
+	type Item = RawElement<'fp>;
+	type IntoIter = RawElementIterator<'fp>;
+
+	fn into_iter(self) -> Self::IntoIter {
+		Self::IntoIter {
 			fp: self.fp,
 			segment: self,
 			index: 0,
@@ -116,11 +126,12 @@ impl<'fp> FingerSegment<'fp> for RawSegment<'fp> {
 }
 
 /// Iterator for segments in a raw fingerprint.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RawSegmentIterator<'fp> {
 	fp: &'fp RawFingerprinter,
 	index: usize,
 	pos: usize,
+	rng: ChaCha8Rng,
 }
 
 impl<'fp> Iterator for RawSegmentIterator<'fp> {
@@ -134,29 +145,33 @@ impl<'fp> Iterator for RawSegmentIterator<'fp> {
 		let index = self.index;
 		let start_pos = self.pos;
 		let end_pos = start_pos + self.fp.segment_sizes.get(index)?;
+		let size = end_pos - start_pos;
 
 		self.index += 1;
 		self.pos = end_pos;
 
 		Some(RawSegment {
 			fp: self.fp,
-			index: index,
+			index,
 			pos: start_pos,
-			size: end_pos - start_pos,
-			value: None,
+			size,
+			value: match size {
+				0 => Some(Ok(self.rng.gen())),
+				_ => None,
+			},
 		})
 	}
 }
 
 /// Structure for a single byte (u8) of raw data.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RawElement<'fp> {
 	fp: &'fp RawFingerprinter,
 	segment: &'fp RawSegment<'fp>,
 	index: usize,
 	pos: usize,
 	size: usize,
-	data: u8,
+	data: Result<u8, Arc<dyn error::Error>>,
 }
 
 impl<'fp> FingerElement for RawElement<'fp> {
@@ -184,13 +199,16 @@ impl<'fp> FingerElement for RawElement<'fp> {
 		self.size
 	}
 
-	fn data(&self) -> Self::Data {
-		self.data
+	fn data(&self) -> Result<Self::Data, Error> {
+		match self.data.clone() {
+			Ok(data) => Ok(data),
+			Err(e) => Err(Box::new(e)),
+		}
 	}
 }
 
 /// Iterator for elements in a raw fingerprint segment.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RawElementIterator<'fp> {
 	fp: &'fp RawFingerprinter,
 	segment: &'fp RawSegment<'fp>,
@@ -209,16 +227,24 @@ impl<'fp> Iterator for RawElementIterator<'fp> {
 		let pos = self.segment.pos + index;
 		let mut data = [0u8; 1];
 
-		self.fp.handle.read_exact_at(&mut data, pos as u64).ok()?;
+		let data: Result<u8, Arc<dyn error::Error>> =
+			match self.fp.handle.read_exact_at(&mut data, pos as u64) {
+				Ok(_) => Ok(data[0]),
+				Err(e) => {
+					//
+					Err(Arc::new(e))
+				}
+			};
+
 		self.index += 1;
 
 		Some(RawElement {
 			fp: self.fp,
 			segment: self.segment,
-			index: index,
-			pos: pos,
+			index,
+			pos,
 			size: size_of::<u8>(),
-			data: data[0],
+			data,
 		})
 	}
 }

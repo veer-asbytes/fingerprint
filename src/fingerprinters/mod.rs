@@ -1,8 +1,12 @@
-use std::path::{Path, PathBuf};
+use std::{
+	io,
+	path::{Path, PathBuf},
+};
 
+use bitvec::prelude::*;
 use rand::prelude::*;
 
-use crate::Error;
+use crate::{Error, NUM_FINGERPRINT_SEGMENTS};
 
 /// Implementation of raw fingerprinter.
 pub mod raw;
@@ -53,11 +57,11 @@ impl ChooseMultipleStable for Vec<usize> {
 /// Contract of methods implementing a fingerprinter.
 pub trait Fingerprinter<'fp>
 where
-	Self::SegmentIter: Iterator + Clone,
+	&'fp Self: 'fp + IntoIterator,
+	<&'fp Self as IntoIterator>::Item: FingerSegment<'fp>,
+	&'fp <&'fp Self as IntoIterator>::Item: IntoIterator,
+	<&'fp <&'fp Self as IntoIterator>::Item as IntoIterator>::Item: FingerElement,
 {
-	/// Type of fingerprint segment iterator.
-	type SegmentIter;
-
 	/// Create new fingerprinter.
 	fn new<P: AsRef<Path>>(path: P) -> Result<Self, Error>
 	where
@@ -66,21 +70,48 @@ where
 	/// Return path of file being fingerprinted.
 	fn path(&self) -> PathBuf;
 
-	/// Returns iterator over fingerprint segments.
-	fn segments(&'fp self) -> Self::SegmentIter;
+	/// Process through each segment of a file using a particular fingerprinter, generating the final fingerprint.
+	fn finger(&'fp self) -> Result<BitBox<u8>, Error> {
+		let mut fingerprint = bitbox![u8, Lsb0; 0; NUM_FINGERPRINT_SEGMENTS];
+		let mut first = None;
+		let mut last = None;
+
+		for mut segment in self {
+			let value = segment.value()?;
+
+			match last {
+				Some(last) => {
+					if value >= last {
+						fingerprint.set(segment.index() - 1, true);
+					}
+				}
+				None => {
+					first = Some(value);
+				}
+			}
+
+			last = Some(value);
+		}
+
+		if first.ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))?
+			>= last.ok_or_else(|| io::Error::from(io::ErrorKind::InvalidData))?
+		{
+			fingerprint.set(NUM_FINGERPRINT_SEGMENTS - 1, true);
+		}
+
+		Ok(fingerprint)
+	}
 }
 
 /// Methods for a fingerprint segment. A fingerprint consists of a fixed number of segments.
 pub trait FingerSegment<'fp>
 where
-	Self::ElementIter: Iterator + Clone,
-	Self::Value: PartialOrd,
+	&'fp Self: 'fp + IntoIterator,
+	<&'fp Self as IntoIterator>::Item: FingerElement,
+	Self::Value: PartialOrd + Copy,
 {
 	/// Type of fingerprinter.
 	type Fingerprinter;
-
-	/// Type of fingerprint segment element iterator.
-	type ElementIter;
 
 	/// Type of fingerprint segment value.
 	type Value;
@@ -97,11 +128,8 @@ where
 	/// Returns the size (bytes) of the current segment.
 	fn size(&self) -> usize;
 
-	/// Returns an iterator over the elements in the current segment.
-	fn elements(&'fp self) -> Self::ElementIter;
-
 	/// Returns the segment value.
-	fn value(&mut self) -> Self::Value;
+	fn value(&mut self) -> Result<Self::Value, Error>;
 }
 
 /// Methods for an element contained in a fingerprint segment.
@@ -131,5 +159,5 @@ pub trait FingerElement {
 	fn size(&self) -> usize;
 
 	/// Returns the value of the element.
-	fn data(&self) -> Self::Data;
+	fn data(&self) -> Result<Self::Data, Error>;
 }
