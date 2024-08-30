@@ -18,7 +18,9 @@ rand_chacha = "0.3.1"
 divrem = "1.0.0"
 bitvec = "1.0.1"
 hex = "0.4.3"
-#ffmpeg-next = "5.0.3"
+sha2 = "0.10" # for hashing video frames
+ffmpeg-sys-next = "7.0.2"
+ffmpeg-next = "7.0.2"
 
 [features]
 default = ["image", "video", "audio", "text"]
@@ -26,6 +28,11 @@ image = []
 video = []
 audio = []
 text = []
+avdevice = []
+avfilter = []
+avformat = []
+swresample = []
+swscale = []
 
 [package.metadata.docs.rs]
 all-features = true
