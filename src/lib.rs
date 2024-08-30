@@ -2,7 +2,6 @@
 
 #![deny(missing_docs)]
 #![allow(clippy::tabs_in_doc_comments)]
-
 use std::{
 	error,
 	fmt::Display,
@@ -15,6 +14,9 @@ use fingerprinters::{raw::RawFingerprinter, Fingerprinter};
 
 /// Dedicated fingerprinters for various file types.
 pub mod fingerprinters;
+mod video_fingerprint; // Ensure this module is publicly declared
+
+pub use crate::video_fingerprint::{compare_videos, generate_fingerprints};
 
 /// Number of bits (segments) in fingerprint.
 const NUM_FINGERPRINT_SEGMENTS: usize = 128;
@@ -64,7 +66,14 @@ impl Fingerprint {
 					todo!()
 				}
 				infer::MatcherType::Video => {
-					todo!()
+					// Use the `generate_fingerprints` function here
+					let frames =
+						video_fingerprint::extract_frames(&path.as_ref().to_string_lossy())?;
+					let fingerprints = video_fingerprint::generate_fingerprints(frames);
+					(
+						BitBox::from_bitslice(&BitSlice::from_slice(&fingerprints.concat())),
+						Type::Video,
+					)
 				}
 				_ => (RawFingerprinter::new(&path)?.finger()?, Type::Raw),
 			},
@@ -121,8 +130,25 @@ impl Display for Fingerprint {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use crate::Fingerprint;
+	use std::fs;
 
+	#[test]
+	fn test_fingerprint_comparison() {
+		// Ensure you have sample videos in the specified paths for testing
+		let video1_path = "samples/lesson4.mp4";
+		let video2_path = "samples/vid.mp4";
+
+		let fp1 = video_fingerprint::generate_fingerprints(
+			video_fingerprint::extract_frames(video1_path).unwrap(),
+		);
+		let fp2 = video_fingerprint::generate_fingerprints(
+			video_fingerprint::extract_frames(video2_path).unwrap(),
+		);
+
+		assert!(video_fingerprint::compare_videos(video1_path, video2_path).unwrap() > 0.0);
+	}
 	#[test]
 	fn test_empty() {
 		assert_eq!(
