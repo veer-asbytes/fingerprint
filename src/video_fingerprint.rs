@@ -1,5 +1,7 @@
 use ffmpeg_next::{codec, format, frame, media, packet, Error};
 use sha2::{Digest, Sha256};
+const MAX_FRAMES: usize = 100; // or any reasonable number
+use std::collections::HashSet;
 
 pub fn extract_frames(video_path: &str) -> Result<Vec<Vec<u8>>, Error> {
 	// Initialize the FFmpeg library
@@ -21,44 +23,48 @@ pub fn extract_frames(video_path: &str) -> Result<Vec<Vec<u8>>, Error> {
 		.ok_or(Error::StreamNotFound)?
 		.parameters();
 
-	// one way
 	let codec = codec::Id::from(codec_params.id());
 	let mut decoder = codec::Context::from_parameters(codec_params)?
 		.decoder()
 		.video()?;
-	// let codec = codec_params.decoder().ok_or(Error::DecoderNotFound)?;
 
-	//other way
-	// let mut context = codec::Context::from_parameters(codec_params)?;
-	// let mut decoder = context.open_as(codec)?;
-	// Initialize the codec context
-
-	//other way
-	// let context_decoder = codec::context::Context::from_parameters(codec_params)?;
-	// let mut decoder = context_decoder.decoder().video()?;
-	// Initialize a frame container
 	let mut frame = frame::Video::empty();
-
 	let mut frames = Vec::new();
 
-	// Process packets and extract frames
+	let mut packet_count = 0;
+	let mut frame_count = 0;
 	for (stream, packet) in ictx.packets() {
+		packet_count += 1;
 		if stream.index() == input_stream_index {
 			decoder.send_packet(&packet)?;
 			while let Ok(()) = decoder.receive_frame(&mut frame) {
 				let frame_data = frame.data(0).to_vec();
-				frames.push(frame_data);
+				frames.push(frame_data.clone()); // Clone `frame_data` before pushing
+
+				frame_count += 1;
+				eprintln!(
+					"Extracted frame {} with size {}",
+					frame_count,
+					frame_data.len()
+				);
 			}
 		}
 	}
+	eprintln!(
+		"Processed {} packets and extracted {} frames",
+		packet_count, frame_count
+	);
 
 	Ok(frames)
 }
 
 pub fn hash_frame(frame: &[u8]) -> Vec<u8> {
+	println!("Hashing frame with size {}", frame.len());
 	let mut hasher = Sha256::new();
 	hasher.update(frame);
-	hasher.finalize().to_vec()
+	let hash = hasher.finalize().to_vec();
+	println!("Hash: {:?}", hash);
+	hash
 }
 
 /// Generates a vector of fingerprints for the given video frames.
@@ -97,6 +103,7 @@ pub fn generate_fingerprints(frames: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
 /// * There is an issue with opening or reading the video files.
 /// * There is an issue with extracting frames from the video files.
 /// * There is an issue with generating fingerprints from the frames.
+
 pub fn compare_videos(
 	video_path1: &str,
 	video_path2: &str,
@@ -104,18 +111,32 @@ pub fn compare_videos(
 	let frames1 = extract_frames(video_path1)?;
 	let frames2 = extract_frames(video_path2)?;
 
-	let fingerprints1 = generate_fingerprints(frames1);
-	let fingerprints2 = generate_fingerprints(frames2);
+	let fingerprints1: HashSet<_> = generate_fingerprints(frames1).into_iter().collect();
+	let fingerprints2: HashSet<_> = generate_fingerprints(frames2).into_iter().collect();
 
-	// Simple similarity check: count matching fingerprints
-	let mut matches = 0;
-	let total = fingerprints1.len().min(fingerprints2.len());
+	let intersection_size = fingerprints1.intersection(&fingerprints2).count();
+	let union_size = fingerprints1.union(&fingerprints2).count();
 
-	for fingerprint1 in &fingerprints1 {
-		if fingerprints2.contains(fingerprint1) {
-			matches += 1;
-		}
-	}
+	let similarity = if union_size == 0 {
+		0.0
+	} else {
+		intersection_size as f64 / union_size as f64
+	};
 
-	Ok(matches as f64 / total as f64)
+	Ok(similarity)
 }
+
+// fn calculate_similarity(fingerprint1: &[u8], fingerprint2: &[u8]) -> f64 {
+// 	// Implement a similarity calculation (e.g., Hamming distance, cosine similarity, etc.)
+// 	// For simplicity, this example assumes a basic byte-wise comparison.
+// 	let len = fingerprint1.len().min(fingerprint2.len());
+// 	let mut match_count = 0;
+//
+// 	for i in 0..len {
+// 		if fingerprint1[i] == fingerprint2[i] {
+// 			match_count += 1;
+// 		}
+// 	}
+//
+// 	match_count as f64 / len as f64
+// }
