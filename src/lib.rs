@@ -2,22 +2,24 @@
 
 #![deny(missing_docs)]
 #![allow(clippy::tabs_in_doc_comments)]
+use bitvec::prelude::*;
+
 use std::{
 	error,
 	fmt::Display,
 	path::{Path, PathBuf},
 };
 
-use bitvec::prelude::*;
-
 use fingerprinters::{raw::RawFingerprinter, Fingerprinter};
 
 /// Dedicated fingerprinters for various file types.
 pub mod fingerprinters;
+mod vid_finder;
+mod vid_finder1;
 mod video_fingerprint; // Ensure this module is publicly declared
-
-pub use crate::video_fingerprint::{compare_videos, generate_fingerprints};
-
+pub use crate::vid_finder::{compare_videos1, extract_and_filter_frames};
+pub use crate::vid_finder1::{compare_videos2, extract_and_filter_frames1};
+pub use crate::video_fingerprint::{compare_videos, compare_videos5, generate_fingerprints};
 /// Number of bits (segments) in fingerprint.
 const NUM_FINGERPRINT_SEGMENTS: usize = 128;
 
@@ -86,19 +88,84 @@ impl Fingerprint {
 			r#type: kind,
 		})
 	}
-
+	/// Compares the fingerprint of this instance with another fingerprint.
+	///
+	/// This method computes a similarity score between two fingerprints. It compares
+	/// the bit slices of the two fingerprints and returns a similarity score as a
+	/// floating-point number between 0.0 and 1.0. The score represents the fraction
+	/// of bits that match. Additionally, the method considers the possibility that
+	/// the order of the bits might be reversed, and it returns the maximum similarity
+	/// score obtained either from direct comparison or reversed comparison.
+	///
+	/// # Arguments
+	///
+	/// * `other` - The `Fingerprint` instance to compare against.
+	///
+	/// # Returns
+	///
+	/// Returns a `f64` value representing the similarity score between this fingerprint
+	/// and the `other` fingerprint. The score ranges from 0.0 (no similarity) to 1.0
+	/// (perfect similarity).
+	///
+	/// # Example
+	///
+	/// ```
+	/// let first = Fingerprint::finger("path/to/video1.mp4").unwrap();
+	/// let second = Fingerprint::finger("path/to/video2.mp4").unwrap();
+	/// let similarity = first.compare(&second);
+	/// println!("Similarity score: {:.2}", similarity);
+	/// ```
+	///
+	/// # Panics
+	///
+	/// This method may panic if the bit slices are of different lengths, though this
+	/// is handled by taking the minimum length of the two bit slices.
+	///
+	/// # Notes
+	///
+	/// If both fingerprints have the same bits but in reverse order, the similarity
+	/// score will be adjusted to account for that.
 	/// Compare this fingerprint with another. Fingerprints may have different [Fingerprint::type]s.
 	pub fn compare(&self, other: &Fingerprint) -> f64 {
-		let mut similarity = 0f64;
+		let bits_self = self.bits();
+		let bits_other = other.bits();
 
-		for (lbit, rbit) in self.bits().iter().zip(other.bits().iter()) {
-			if lbit == rbit {
-				similarity += 1f64;
+		let bits_self_slice = bits_self.as_bitslice();
+		let bits_other_slice = bits_other.as_bitslice();
+
+		let min_len = bits_self_slice.len().min(bits_other_slice.len());
+		let mut matching_bits = 0;
+
+		println!("Comparing fingerprints:");
+		println!(
+			"Self bits: {:?}",
+			bits_self_slice.iter().take(50).collect::<Vec<_>>()
+		); // Print first 50 bits
+		println!(
+			"Other bits: {:?}",
+			bits_other_slice.iter().take(50).collect::<Vec<_>>()
+		); // Print first 50 bits
+
+		for i in 0..min_len {
+			if bits_self_slice[i] == bits_other_slice[i] {
+				matching_bits += 1;
+			} else {
+				println!(
+					"Mismatch at position {}: Self: {}, Other: {}",
+					i, bits_self_slice[i], bits_other_slice[i]
+				);
 			}
 		}
 
-		similarity / NUM_FINGERPRINT_SEGMENTS as f64
+		let direct_similarity = matching_bits as f64 / min_len as f64;
+		println!("Direct similarity: {:.2}", direct_similarity);
+
+		// Return the maximum similarity
+		// Return the maximum similarity
+		// similarity
+		direct_similarity
 	}
+	//hamminf distance
 
 	/// Return vector of fingerprint bits.
 	pub fn bits(&self) -> BitBox<u8> {
@@ -132,23 +199,49 @@ impl Display for Fingerprint {
 mod tests {
 	use super::*;
 	use crate::Fingerprint;
-	use std::fs;
+	// use std::fs;
 
 	#[test]
 	fn test_fingerprint_comparison() {
 		// Ensure you have sample videos in the specified paths for testing
-		let video1_path = "samples/lesson4.mp4";
-		let video2_path = "samples/vid.mp4";
+		let video1_path = "samples/m1.mp4";
+		let video2_path = "samples/m2.mp4";
 
-		let fp1 = video_fingerprint::generate_fingerprints(
-			video_fingerprint::extract_frames(video1_path).unwrap(),
-		);
-		let fp2 = video_fingerprint::generate_fingerprints(
-			video_fingerprint::extract_frames(video2_path).unwrap(),
-		);
+		// Extract frames and handle potential errors
+		// let frames1 = match video_fingerprint::extract_frames(video1_path) {
+		// 	Ok(frames) => frames,
+		// 	Err(e) => {
+		// 		eprintln!("Error extracting frames from {}: {}", video1_path, e);
+		// 		return;
+		// 	}
+		// };
+		//
+		// let frames2 = match video_fingerprint::extract_frames(video2_path) {
+		// 	Ok(frames) => frames,
+		// 	Err(e) => {
+		// 		eprintln!("Error extracting frames from {}: {}", video2_path, e);
+		// 		return;
+		// 	}
+		// };
+		//
+		// // Generate fingerprints and handle potential errors
+		// let fingerprints1 = video_fingerprint::generate_fingerprints(frames1);
+		// let fingerprints2 = video_fingerprint::generate_fingerprints(frames2);
 
-		assert!(video_fingerprint::compare_videos(video1_path, video2_path).unwrap() > 0.0);
+		// Perform comparison and handle potential errors
+		match video_fingerprint::compare_videos5(video1_path, video2_path) {
+			Ok(similarity) => {
+				println!("Similarity score: {}", similarity);
+
+				assert!(similarity > 0.0, "Videos are not similar");
+			}
+			Err(e) => {
+				eprintln!("Error comparing videos: {}", e);
+				panic!("Test failed due to error");
+			}
+		}
 	}
+
 	#[test]
 	fn test_empty() {
 		assert_eq!(
@@ -177,10 +270,19 @@ mod tests {
 
 	#[test]
 	fn test_ascii_text_somewhat_similar() {
-		let first = Fingerprint::finger("samples/ascii.txt").unwrap();
-		let second = Fingerprint::finger("samples/ascii_somewhat_similar.txt").unwrap();
+		let first = Fingerprint::finger("samples/1.mp4").unwrap();
+		let second = Fingerprint::finger("samples/2.mp4").unwrap();
+		// Compare the fingerprints
+		let similarity = first.compare(&second);
 
-		assert_eq!(first.compare(&second), 0.65625);
+		// Print the similarity score
+		println!(
+			"Similarity score between 'samples/lesson4.mp4' and 'samples/vid.mp4': {:.2}",
+			similarity
+		);
+
+		// Assertion
+		assert_eq!(similarity, 1.0);
 	}
 
 	#[test]

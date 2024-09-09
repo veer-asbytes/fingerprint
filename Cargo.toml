@@ -21,6 +21,14 @@ hex = "0.4.3"
 sha2 = "0.10" # for hashing video frames
 ffmpeg-sys-next = "7.0.2"
 ffmpeg-next = "7.0.2"
+phash = "0.1.0"          # Perceptual hashing library
+image = "0.24"
+lh = "0.3.1"
+imageproc = "0.25.0"
+image_hasher = "2.0.0"
+blake3 = "1.5.4"
+img_hash = "3.2.0"
+vid_dup_finder_lib = "0.1.1"
 
 [features]
 default = ["image", "video", "audio", "text"]
