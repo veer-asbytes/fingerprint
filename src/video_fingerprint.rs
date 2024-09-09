@@ -1,6 +1,8 @@
 use ffmpeg_next::{codec, format, frame, media, packet, Error};
-use sha2::{Digest, Sha256};
-const MAX_FRAMES: usize = 100; // or any reasonable number
+use std::path::Path;
+use vid_dup_finder_lib::{NormalizedTolerance, VideoHash};
+
+use blake3::Hasher;
 use std::collections::HashSet;
 
 pub fn extract_frames(video_path: &str) -> Result<Vec<Vec<u8>>, Error> {
@@ -33,20 +35,26 @@ pub fn extract_frames(video_path: &str) -> Result<Vec<Vec<u8>>, Error> {
 
 	let mut packet_count = 0;
 	let mut frame_count = 0;
+	let mut segment_start_time = 0;
+	let segment_duration: i64 = 120;
 	for (stream, packet) in ictx.packets() {
 		packet_count += 1;
 		if stream.index() == input_stream_index {
 			decoder.send_packet(&packet)?;
 			while let Ok(()) = decoder.receive_frame(&mut frame) {
-				let frame_data = frame.data(0).to_vec();
-				frames.push(frame_data.clone()); // Clone `frame_data` before pushing
-
-				frame_count += 1;
-				eprintln!(
-					"Extracted frame {} with size {}",
-					frame_count,
-					frame_data.len()
-				);
+				let current_frame_time = frame.timestamp().unwrap_or(0);
+				if current_frame_time >= segment_start_time + segment_duration {
+					let frame_data = frame.data(0).to_vec();
+					frames.push(frame_data.clone()); // Clone `frame_data` before pushing
+					segment_start_time = current_frame_time;
+					frame_count += 1;
+					eprintln!(
+						"Extracted summary frame {} at time {} with size {}",
+						frame_count,
+						current_frame_time,
+						frame_data.len()
+					);
+				}
 			}
 		}
 	}
@@ -60,9 +68,9 @@ pub fn extract_frames(video_path: &str) -> Result<Vec<Vec<u8>>, Error> {
 
 pub fn hash_frame(frame: &[u8]) -> Vec<u8> {
 	println!("Hashing frame with size {}", frame.len());
-	let mut hasher = Sha256::new();
+	let mut hasher = Hasher::new();
 	hasher.update(frame);
-	let hash = hasher.finalize().to_vec();
+	let hash = hasher.finalize().as_bytes().to_vec();
 	println!("Hash: {:?}", hash);
 	hash
 }
@@ -80,8 +88,16 @@ pub fn hash_frame(frame: &[u8]) -> Vec<u8> {
 ///
 /// * `Vec<Vec<u8>>` - A vector of fingerprints, where each fingerprint is a `Vec<u8>` representing the SHA-256 hash of the corresponding frame.
 pub fn generate_fingerprints(frames: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
-	frames.into_iter().map(|frame| hash_frame(&frame)).collect()
+	frames
+		.into_iter()
+		.map(|frame| {
+			let hash = hash_frame(&frame);
+			println!("Frame hash: {:?}", hash);
+			hash
+		})
+		.collect()
 }
+
 /// Compares two videos by extracting frames and generating fingerprints, then computing the similarity between the two sets of fingerprints.
 ///
 /// This function extracts frames from the two provided video files, generates fingerprints for each frame,
@@ -103,8 +119,67 @@ pub fn generate_fingerprints(frames: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
 /// * There is an issue with opening or reading the video files.
 /// * There is an issue with extracting frames from the video files.
 /// * There is an issue with generating fingerprints from the frames.
-
 pub fn compare_videos(
+	video_path1: &str,
+	video_path2: &str,
+) -> Result<f64, Box<dyn std::error::Error>> {
+	// Generate hashes for the videos using vid_dup_finder_lib
+	let video_hash1 = VideoHash::from_path(video_path1)?;
+	let video_hash2 = VideoHash::from_path(video_path2)?;
+
+	// Use NormalizedTolerance to set the tolerance level for finding duplicates
+	let tolerance = NormalizedTolerance::default();
+
+	// Perform the search for duplicates using the generated hashes
+	let dup_groups = vid_dup_finder_lib::search(vec![video_hash1, video_hash2], tolerance);
+
+	// Calculate similarity score based on the duplicate groups
+	let similarity = if dup_groups.len() == 1 {
+		1.0 // Both videos are considered duplicates
+	} else {
+		0.0 // Videos are not considered duplicates
+	};
+
+	Ok(similarity)
+}
+/// Compares two videos to determine their similarity based on the intersection of their frame fingerprints.
+///
+/// This function extracts frames from the two given video files and generates fingerprints for each frame.
+/// It then calculates the similarity between the two videos based on the Jaccard index of their frame fingerprints.
+///
+/// The similarity score is a floating-point value between 0.0 and 1.0, where 1.0 indicates identical videos
+/// (i.e., all frame fingerprints match) and 0.0 indicates no similarity (i.e., no frame fingerprints match).
+///
+/// # Arguments
+///
+/// * `video_path1` - A string slice representing the path to the first video file.
+/// * `video_path2` - A string slice representing the path to the second video file.
+///
+/// # Returns
+///
+/// Returns a `Result<f64, Box<dyn std::error::Error>>`:
+/// * On success, returns the similarity score as a `f64`.
+/// * On failure, returns an error wrapped in a `Box<dyn std::error::Error>`.
+///
+/// # Example
+///
+/// ```
+/// let video_path1 = "path/to/first/video.mp4";
+/// let video_path2 = "path/to/second/video.mp4";
+///
+/// match compare_videos5(video_path1, video_path2) {
+///     Ok(similarity) => println!("The similarity between the videos is: {:.2}", similarity),
+///     Err(e) => eprintln!("Error comparing videos: {}", e),
+/// }
+/// ```
+///
+/// # Errors
+///
+/// This function will return an error if:
+/// * There is an issue extracting frames from either video (e.g., file not found, format not supported).
+/// * The fingerprint generation or similarity calculation encounters an error.
+
+pub fn compare_videos5(
 	video_path1: &str,
 	video_path2: &str,
 ) -> Result<f64, Box<dyn std::error::Error>> {

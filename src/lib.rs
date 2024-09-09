@@ -2,22 +2,24 @@
 
 #![deny(missing_docs)]
 #![allow(clippy::tabs_in_doc_comments)]
+use bitvec::prelude::*;
+
 use std::{
 	error,
 	fmt::Display,
 	path::{Path, PathBuf},
 };
 
-use bitvec::prelude::*;
-
 use fingerprinters::{raw::RawFingerprinter, Fingerprinter};
 
 /// Dedicated fingerprinters for various file types.
 pub mod fingerprinters;
+mod vid_finder;
+mod vid_finder1;
 mod video_fingerprint; // Ensure this module is publicly declared
-
-pub use crate::video_fingerprint::{compare_videos, generate_fingerprints};
-
+pub use crate::vid_finder::{compare_videos1, extract_and_filter_frames};
+pub use crate::vid_finder1::{compare_videos2, extract_and_filter_frames1};
+pub use crate::video_fingerprint::{compare_videos, compare_videos5, generate_fingerprints};
 /// Number of bits (segments) in fingerprint.
 const NUM_FINGERPRINT_SEGMENTS: usize = 128;
 
@@ -86,7 +88,6 @@ impl Fingerprint {
 			r#type: kind,
 		})
 	}
-
 	/// Compares the fingerprint of this instance with another fingerprint.
 	///
 	/// This method computes a similarity score between two fingerprints. It compares
@@ -156,23 +157,15 @@ impl Fingerprint {
 			}
 		}
 
-		// Additional handling for reversed order
-		let reversed_bits_other_slice = bits_other_slice.iter().rev().collect::<Vec<_>>(); // Reverse the bit slice
-		let reversed_matching_bits = bits_self_slice
-			.iter()
-			.zip(reversed_bits_other_slice.iter())
-			.filter(|(a, b)| a == *b) // Dereference `b` to compare the values
-			.count();
-
-		let similarity = matching_bits as f64 / min_len as f64;
-		let reversed_similarity = reversed_matching_bits as f64 / min_len as f64;
-
-		println!("Direct similarity: {:.2}", similarity);
-		println!("Reversed similarity: {:.2}", reversed_similarity);
+		let direct_similarity = matching_bits as f64 / min_len as f64;
+		println!("Direct similarity: {:.2}", direct_similarity);
 
 		// Return the maximum similarity
-		similarity
+		// Return the maximum similarity
+		// similarity
+		direct_similarity
 	}
+	//hamminf distance
 
 	/// Return vector of fingerprint bits.
 	pub fn bits(&self) -> BitBox<u8> {
@@ -206,13 +199,13 @@ impl Display for Fingerprint {
 mod tests {
 	use super::*;
 	use crate::Fingerprint;
-	use std::fs;
+	// use std::fs;
 
 	#[test]
 	fn test_fingerprint_comparison() {
 		// Ensure you have sample videos in the specified paths for testing
-		let video1_path = "samples/merge1.mp4";
-		let video2_path = "samples/merge2.mp4";
+		let video1_path = "samples/m1.mp4";
+		let video2_path = "samples/m2.mp4";
 
 		// Extract frames and handle potential errors
 		// let frames1 = match video_fingerprint::extract_frames(video1_path) {
@@ -236,7 +229,7 @@ mod tests {
 		// let fingerprints2 = video_fingerprint::generate_fingerprints(frames2);
 
 		// Perform comparison and handle potential errors
-		match video_fingerprint::compare_videos(video1_path, video2_path) {
+		match video_fingerprint::compare_videos5(video1_path, video2_path) {
 			Ok(similarity) => {
 				println!("Similarity score: {}", similarity);
 
@@ -277,11 +270,10 @@ mod tests {
 
 	#[test]
 	fn test_ascii_text_somewhat_similar() {
-		let first = Fingerprint::finger("samples/merge1.mp4").unwrap();
-		let second = Fingerprint::finger("samples/merge2.mp4").unwrap();
+		let first = Fingerprint::finger("samples/1.mp4").unwrap();
+		let second = Fingerprint::finger("samples/2.mp4").unwrap();
 		// Compare the fingerprints
 		let similarity = first.compare(&second);
-		let similarity2 = second.compare(&first);
 
 		// Print the similarity score
 		println!(
@@ -290,7 +282,7 @@ mod tests {
 		);
 
 		// Assertion
-		assert_eq!(similarity, similarity2);
+		assert_eq!(similarity, 1.0);
 	}
 
 	#[test]
