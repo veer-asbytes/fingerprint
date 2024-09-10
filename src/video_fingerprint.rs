@@ -1,13 +1,138 @@
 use ffmpeg_next::{codec, format, frame, media, packet, Error};
+use image::{DynamicImage, ImageFormat};
 use std::path::Path;
-use vid_dup_finder_lib::{NormalizedTolerance, VideoHash};
+use std::time::Instant;
+use vid_dup_finder_lib::{NormalizedTolerance, VideoHash}; // For measuring time
 
 use blake3::Hasher;
 use std::collections::HashSet;
+use std::io::Cursor;
+use std::process::Command;
 
+fn decode_video_with_nvdec(input: &str) -> Result<(), Box<dyn std::error::Error>> {
+	let start_time = Instant::now(); // Start timing hashing/fingerprinting
+
+	let status = Command::new("ffmpeg")
+		.args(&[
+			"-hwaccel",
+			"videotools", // Enable hardware acceleration using CUDA
+			"-i",
+			input, // Input video file
+			"-vf",
+			"fps=1",
+			"-f",
+			"image2pipe",
+			"-pix_fmt",
+			"yuvj444p",
+			"-",
+		])
+		.status()?;
+
+	if status.success() {
+		println!("Video decoded successfully with NVDEC");
+	} else {
+		eprintln!("Failed to decode video");
+	}
+	Ok(())
+}
+
+pub fn extract_frames_with_videotoolbox(
+	video_path: &str,
+) -> Result<Vec<Vec<u8>>, Box<dyn std::error::Error>> {
+	let start_time = Instant::now(); // Start timing hashing/fingerprinting
+
+	let output = Command::new("ffmpeg")
+		.args(&[
+			"-hwaccel",
+			"videotoolbox",
+			"-i",
+			video_path,
+			"-vf",
+			"fps=1",
+			"-f",
+			"image2pipe",
+			"-pix_fmt",
+			"yuvj444p",
+			"-",
+		])
+		.output()?;
+
+	if !output.status.success() {
+		return Err(format!("FFmpeg error: {}", String::from_utf8_lossy(&output.stderr)).into());
+	}
+	let frame_data = output.stdout;
+	let mut frames: Vec<u64> = Vec::new();
+	let mut cursor = Cursor::new(frame_data.clone());
+
+	println!("Output size: {}", cursor.get_ref().len());
+	let width = 1920; // Replace with actual video width if different
+	let height = 1080; // Replace with actual video height if different
+	let frame_size = width * height * 3; // yuvj444p has 3 bytes per pixel
+
+	println!("Output size using frame data: {}", frame_data.len());
+
+	// Print the first 100 bytes of the output for debugging
+	println!(
+		"First 100 bytes of output: {:?}",
+		&frame_data[..std::cmp::min(100, frame_data.len())]
+	);
+
+	let num_frames = frame_data.len() / frame_size;
+	// println!("Number of frames: {}", num_frames);
+
+	let mut frames = Vec::with_capacity(num_frames);
+
+	for i in 0..num_frames {
+		let start = i * frame_size;
+		let end = start + frame_size;
+		if end <= frame_data.len() {
+			let frame = frame_data[start..end].to_vec();
+			frames.push(frame);
+		} else {
+			println!("Frame {} out of bounds", i);
+		}
+	}
+
+	// println!("Extracted frames count: {}", frames.len());
+	let elapsed_time = start_time.elapsed(); // Stop timing frame extraction
+
+	println!("Frame extraction completed in {:?}", elapsed_time);
+
+	Ok(frames)
+}
+pub fn hash_frame1(image: &DynamicImage) -> Vec<u8> {
+	// Convert DynamicImage to a byte array (PNG format)
+	let mut buffer = Vec::new();
+
+	// Hash the byte array using blake3
+	let mut hasher = Hasher::new();
+	hasher.update(&buffer);
+	let hash = hasher.finalize();
+
+	println!("Hash: {:?}", hash);
+	hash.as_bytes().to_vec()
+}
+
+pub fn generate_fingerprints1(frames: Vec<DynamicImage>) -> Vec<Vec<u8>> {
+	let start_time = Instant::now(); // Start timing hashing/fingerprinting
+
+	let fingerprints: Vec<Vec<u8>> = frames
+		.into_iter()
+		.map(|frame| {
+			let hash = hash_frame1(&frame);
+			hash
+		})
+		.collect();
+
+	let elapsed_time = start_time.elapsed(); // Stop timing hashing/fingerprinting
+	println!("Hashing and fingerprinting completed in {:?}", elapsed_time);
+
+	fingerprints
+}
 pub fn extract_frames(video_path: &str) -> Result<Vec<Vec<u8>>, Error> {
 	// Initialize the FFmpeg library
 	ffmpeg_next::init()?;
+	let start_time = Instant::now(); // Start timing the frame extraction
 
 	// Open the video file
 	let mut ictx = format::input(&video_path)?;
@@ -48,12 +173,12 @@ pub fn extract_frames(video_path: &str) -> Result<Vec<Vec<u8>>, Error> {
 					frames.push(frame_data.clone()); // Clone `frame_data` before pushing
 					segment_start_time = current_frame_time;
 					frame_count += 1;
-					eprintln!(
-						"Extracted summary frame {} at time {} with size {}",
-						frame_count,
-						current_frame_time,
-						frame_data.len()
-					);
+					// eprintln!(
+					// 	"Extracted summary frame {} at time {} with size {}",
+					// 	frame_count,
+					// 	current_frame_time,
+					// 	frame_data.len()
+					// );
 				}
 			}
 		}
@@ -62,16 +187,19 @@ pub fn extract_frames(video_path: &str) -> Result<Vec<Vec<u8>>, Error> {
 		"Processed {} packets and extracted {} frames",
 		packet_count, frame_count
 	);
+	let elapsed_time = start_time.elapsed(); // Stop timing frame extraction
+
+	println!("Frame extraction completed in {:?}", elapsed_time);
 
 	Ok(frames)
 }
 
 pub fn hash_frame(frame: &[u8]) -> Vec<u8> {
-	println!("Hashing frame with size {}", frame.len());
+	// println!("Hashing frame with size {}", frame.len());
 	let mut hasher = Hasher::new();
 	hasher.update(frame);
 	let hash = hasher.finalize().as_bytes().to_vec();
-	println!("Hash: {:?}", hash);
+	// println!("Hash: {:?}", hash);
 	hash
 }
 
@@ -88,14 +216,20 @@ pub fn hash_frame(frame: &[u8]) -> Vec<u8> {
 ///
 /// * `Vec<Vec<u8>>` - A vector of fingerprints, where each fingerprint is a `Vec<u8>` representing the SHA-256 hash of the corresponding frame.
 pub fn generate_fingerprints(frames: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
-	frames
+	let start_time = Instant::now(); // Start timing hashing/fingerprinting
+
+	let fingerprints: Vec<Vec<u8>> = frames
 		.into_iter()
 		.map(|frame| {
 			let hash = hash_frame(&frame);
-			println!("Frame hash: {:?}", hash);
 			hash
 		})
-		.collect()
+		.collect();
+
+	let elapsed_time = start_time.elapsed(); // Stop timing hashing/fingerprinting
+	println!("Hashing and fingerprinting completed in {:?}", elapsed_time);
+
+	fingerprints
 }
 
 /// Compares two videos by extracting frames and generating fingerprints, then computing the similarity between the two sets of fingerprints.
@@ -119,26 +253,33 @@ pub fn generate_fingerprints(frames: Vec<Vec<u8>>) -> Vec<Vec<u8>> {
 /// * There is an issue with opening or reading the video files.
 /// * There is an issue with extracting frames from the video files.
 /// * There is an issue with generating fingerprints from the frames.
-pub fn compare_videos(
+pub fn compare_videos_with_nvdec(
 	video_path1: &str,
 	video_path2: &str,
 ) -> Result<f64, Box<dyn std::error::Error>> {
-	// Generate hashes for the videos using vid_dup_finder_lib
-	let video_hash1 = VideoHash::from_path(video_path1)?;
-	let video_hash2 = VideoHash::from_path(video_path2)?;
+	let start_time = Instant::now(); // Start timing the process
 
-	// Use NormalizedTolerance to set the tolerance level for finding duplicates
-	let tolerance = NormalizedTolerance::default();
+	// Extract frames from both videos using NVDEC
+	let frames1 = extract_frames_with_videotoolbox(video_path1)?;
+	let frames2 = extract_frames_with_videotoolbox(video_path2)?;
+	// println!("frames: {:?}", frames1);
+	// println!("frames: {:?}", frames1);
+	// Generate fingerprints for both videos
+	let fingerprints1: HashSet<_> = generate_fingerprints(frames1).into_iter().collect();
+	let fingerprints2: HashSet<_> = generate_fingerprints(frames2).into_iter().collect();
 
-	// Perform the search for duplicates using the generated hashes
-	let dup_groups = vid_dup_finder_lib::search(vec![video_hash1, video_hash2], tolerance);
+	// Calculate similarity based on fingerprints (Jaccard index)
+	let intersection_size = fingerprints1.intersection(&fingerprints2).count();
+	let union_size = fingerprints1.union(&fingerprints2).count();
 
-	// Calculate similarity score based on the duplicate groups
-	let similarity = if dup_groups.len() == 1 {
-		1.0 // Both videos are considered duplicates
+	let similarity = if union_size == 0 {
+		0.0
 	} else {
-		0.0 // Videos are not considered duplicates
+		intersection_size as f64 / union_size as f64
 	};
+
+	let elapsed_time = start_time.elapsed(); // Stop timing
+	println!("Video comparison using GPU completed in {:?}", elapsed_time);
 
 	Ok(similarity)
 }

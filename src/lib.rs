@@ -19,7 +19,9 @@ mod vid_finder1;
 mod video_fingerprint; // Ensure this module is publicly declared
 pub use crate::vid_finder::{compare_videos1, extract_and_filter_frames};
 pub use crate::vid_finder1::{compare_videos2, extract_and_filter_frames1};
-pub use crate::video_fingerprint::{compare_videos, compare_videos5, generate_fingerprints};
+pub use crate::video_fingerprint::{
+	compare_videos5, compare_videos_with_nvdec, generate_fingerprints,
+};
 /// Number of bits (segments) in fingerprint.
 const NUM_FINGERPRINT_SEGMENTS: usize = 128;
 
@@ -204,8 +206,8 @@ mod tests {
 	#[test]
 	fn test_fingerprint_comparison() {
 		// Ensure you have sample videos in the specified paths for testing
-		let video1_path = "samples/m1.mp4";
-		let video2_path = "samples/m2.mp4";
+		let video1_path = "samples/vid.mp4";
+		let video2_path = "samples/lesson4.mp4";
 
 		// Extract frames and handle potential errors
 		// let frames1 = match video_fingerprint::extract_frames(video1_path) {
@@ -229,7 +231,7 @@ mod tests {
 		// let fingerprints2 = video_fingerprint::generate_fingerprints(frames2);
 
 		// Perform comparison and handle potential errors
-		match video_fingerprint::compare_videos5(video1_path, video2_path) {
+		match video_fingerprint::compare_videos_with_nvdec(video1_path, video2_path) {
 			Ok(similarity) => {
 				println!("Similarity score: {}", similarity);
 
@@ -270,8 +272,8 @@ mod tests {
 
 	#[test]
 	fn test_ascii_text_somewhat_similar() {
-		let first = Fingerprint::finger("samples/1.mp4").unwrap();
-		let second = Fingerprint::finger("samples/2.mp4").unwrap();
+		let first = Fingerprint::finger("samples/3.mp4").unwrap();
+		let second = Fingerprint::finger("samples/4.mp4").unwrap();
 		// Compare the fingerprints
 		let similarity = first.compare(&second);
 

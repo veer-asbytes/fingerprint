@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::error::Error;
-use vid_dup_finder_lib::{NormalizedTolerance, VideoHash};
+use std::time::Instant;
+use vid_dup_finder_lib::{NormalizedTolerance, VideoHash}; // For measuring time
 
 /// Extracts frames from a video and filters out similar frames based on hashing.
 ///
@@ -58,6 +59,8 @@ pub fn extract_and_filter_frames(
 /// This function will return an error if video hashing fails or if any other error occurs.
 pub fn compare_videos1(video_path1: &str, video_path2: &str) -> Result<f64, Box<dyn Error>> {
 	// Generate hashes for the entire videos
+	let start_time = Instant::now(); // Start timing comparison
+
 	let video_hash1 = VideoHash::from_path(video_path1)?;
 	let video_hash2 = VideoHash::from_path(video_path2)?;
 
@@ -73,7 +76,8 @@ pub fn compare_videos1(video_path1: &str, video_path2: &str) -> Result<f64, Box<
 	} else {
 		0.0 // Videos are not considered duplicates
 	};
-
+	let elapsed_time = start_time.elapsed(); // Stop timing comparison
+	println!("Video comparison completed in {:?}", elapsed_time);
 	Ok(similarity)
 }
 
