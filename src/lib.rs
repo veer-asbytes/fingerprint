@@ -206,8 +206,8 @@ mod tests {
 	#[test]
 	fn test_fingerprint_comparison() {
 		// Ensure you have sample videos in the specified paths for testing
-		let video1_path = "samples/vid.mp4";
-		let video2_path = "samples/lesson4.mp4";
+		let video1_path = "samples/1.mp4";
+		let video2_path = "samples/1-2.avi";
 
 		// Extract frames and handle potential errors
 		// let frames1 = match video_fingerprint::extract_frames(video1_path) {
@@ -231,7 +231,7 @@ mod tests {
 		// let fingerprints2 = video_fingerprint::generate_fingerprints(frames2);
 
 		// Perform comparison and handle potential errors
-		match video_fingerprint::compare_videos_with_nvdec(video1_path, video2_path) {
+		match video_fingerprint::compare_videos5(video1_path, video2_path) {
 			Ok(similarity) => {
 				println!("Similarity score: {}", similarity);
 

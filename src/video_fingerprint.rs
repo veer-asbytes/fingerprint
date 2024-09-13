@@ -23,7 +23,7 @@ fn decode_video_with_nvdec(input: &str) -> Result<(), Box<dyn std::error::Error>
 			"-f",
 			"image2pipe",
 			"-pix_fmt",
-			"yuvj444p",
+			"rgb24",
 			"-",
 		])
 		.status()?;
@@ -52,7 +52,7 @@ pub fn extract_frames_with_videotoolbox(
 			"-f",
 			"image2pipe",
 			"-pix_fmt",
-			"yuvj444p",
+			"rgb24",
 			"-",
 		])
 		.output()?;
@@ -78,7 +78,7 @@ pub fn extract_frames_with_videotoolbox(
 	);
 
 	let num_frames = frame_data.len() / frame_size;
-	// println!("Number of frames: {}", num_frames);
+	println!("Number of frames: {}", num_frames);
 
 	let mut frames = Vec::with_capacity(num_frames);
 
@@ -93,7 +93,7 @@ pub fn extract_frames_with_videotoolbox(
 		}
 	}
 
-	// println!("Extracted frames count: {}", frames.len());
+	println!("Extracted frames count: {}", frames.len());
 	let elapsed_time = start_time.elapsed(); // Stop timing frame extraction
 
 	println!("Frame extraction completed in {:?}", elapsed_time);
